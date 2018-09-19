@@ -11,5 +11,8 @@
     "url": "https://tccl-apps/git/webdeploy/sass.git"
   },
   "author": "Roger Gee",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "node-sass": "^4.9.3"
+  }
 }
