@@ -1,0 +1,15 @@
+{
+  "name": "@tccl/sass",
+  "version": "1.0.0",
+  "description": "Webdeploy sass deploy plugin",
+  "main": "sass.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://tccl-apps/git/webdeploy/sass.git"
+  },
+  "author": "Roger Gee",
+  "license": "MIT"
+}
