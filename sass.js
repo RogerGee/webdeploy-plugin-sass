@@ -93,7 +93,6 @@ function makeCustomImporter(targets,moduleBase) {
 }
 
 module.exports = {
-    id: "sass",
     exec: (context,settings) => {
         settings.moduleBase = settings.moduleBase || "";
 
@@ -162,8 +161,8 @@ module.exports = {
 
                             resolve();
                         }
-                    });
-                });
+                    })
+                })
 
                 promises.push(renderPromise);
             }
@@ -172,6 +171,6 @@ module.exports = {
             context.resolveTargets(null,rm);
 
             return Promise.all(promises);
-        });
+        })
     }
 }
