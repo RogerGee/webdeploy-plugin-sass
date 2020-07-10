@@ -5,17 +5,18 @@ const nodeSass = require('node-sass');
 
 const SCSS_REGEX = /\.scss$/;
 
+function stripLeading(string,match) {
+    while (string.substring(0,match.length) == match) {
+        string = string.substring(match.length);
+    }
+    return string;
+}
+
 function resolveModulePath(path,currentPath) {
     // Remove trailing extension component.
     var match = path.match(/\.[^./]+$/);
     if (match) {
         path = path.substr(0,path.length - match[0].length);
-    }
-
-    // Substitute '~' with base path. This is as simple as just removing the
-    // '~'.
-    if (path[0] == '~') {
-        return resolveModulePath(path.substr(1),currentPath);
     }
 
     // Resolve "." or ".." recursively.
@@ -36,37 +37,21 @@ function resolveModulePath(path,currentPath) {
     }
 
     // Strip off leading path separator components.
-    var pos = 0;
-    while (pos < path.length && path[pos] == '/') {
-        pos += 1;
-    }
-
-    return path.substr(pos);
+    return stripLeading(path,pathModule.sep);
 }
 
 function makeCustomImporter(targets,moduleBase) {
     var targetMap = {};
 
-    function targetPathToModulePath(targetPath) {
-        if (targetPath.substr(0,moduleBase.length) == moduleBase) {
-            var offset = moduleBase.length;
-            while (offset < targetPath.length && targetPath[offset] == '/') {
-                offset += 1;
-            }
-
-            var modulePath = targetPath.substr(offset);
-        }
-        else {
-            var modulePath = targetPath;
-        }
-
-        return modulePath;
-    }
-
     for (var i = 0;i < targets.length;++i) {
         // Make the module path relative to the configured moduleBase.
         var targetPath = targets[i].getSourceTargetPath();
-        var modulePath = targetPathToModulePath(targetPath);
+        var modulePath = targetPath;
+        if (moduleBase) {
+            modulePath = stripLeading(modulePath,pathModule.sep);
+            modulePath = stripLeading(modulePath,moduleBase);
+            modulePath = stripLeading(modulePath,pathModule.sep);
+        }
 
         // Remove trailing extension.
         modulePath = modulePath.substr(0,modulePath.length-5);
@@ -75,12 +60,12 @@ function makeCustomImporter(targets,moduleBase) {
     }
 
     return (url,prev,done) => {
-        if (prev[0] == '/') {
-            prev = targetPathToModulePath(prev.substr(1));
+        if (moduleBase) {
+            prev = stripLeading(prev,pathModule.sep);
+            prev = stripLeading(prev,moduleBase);
+            prev = stripLeading(prev,pathModule.sep);
         }
-        else {
-            prev = pathModule.parse(prev).dir;
-        }
+        prev = pathModule.parse(prev).dir;
 
         var path = resolveModulePath(url,prev);
         if (path in targetMap) {
@@ -94,18 +79,16 @@ function makeCustomImporter(targets,moduleBase) {
 
 module.exports = {
     exec: (context,settings) => {
-        settings.moduleBase = settings.moduleBase || "";
+        settings.moduleBase = stripLeading(settings.moduleBase || "",'/');
 
         var scss = [];
 
         // Find all .scss targets.
-        for (var i = 0;i < context.targets.length;++i) {
-            var target = context.targets[i];
-
+        context.forEachTarget((target) => {
             if (target.targetName.match(SCSS_REGEX)) {
                 scss.push(target);
             }
-        }
+        });
 
         if (scss.length == 0) {
             return Promise.resolve();
@@ -135,33 +118,37 @@ module.exports = {
                 }
 
                 var renderPromise = new Promise((resolve,reject) => {
+                    let targetPath = target.getSourceTargetPath();
+
                     nodeSass.render({
-                        file: '/' + target.sourcePath,
-                        data: target.content,
-                        includePaths: [target.sourcePath],
+                        // NOTE: We make all files relative to root directory to
+                        // prevent resolution by libsass.
+                        file: '/' + targetPath,
+                        data: target.getContent(),
+                        includePaths: [target.getSourcePath()],
                         indentedSyntax: false,
                         importer: importFunc
+
                     }, (err, result) => {
                         if (err) {
+                            console.log(err);
                             reject(err);
                         }
                         else {
                             // Only include the build product if it resolved to actual content.
                             if (result.css.length > 0) {
-                                var match = target.targetName.match(/(.*)\.scss$/);
-                                var newPath = pathModule.join(target.sourcePath,match[1] + ".css");
-                                var newTarget = context.resolveTargets(newPath,[target]);
+                                var newTarget = context.resolveTargets(targetPath,[target]);
                                 newTarget.stream.end(result.css.toString('utf8'));
                             }
                             else {
-                                // Remove targets that evaluated to empty.
+                                // Otherwise remove the target if it evaluated to empty.
                                 context.resolveTargets(null,[target]);
                             }
 
                             resolve();
                         }
-                    })
-                })
+                    });
+                });
 
                 promises.push(renderPromise);
             }
@@ -170,6 +157,6 @@ module.exports = {
             context.resolveTargets(null,rm);
 
             return Promise.all(promises);
-        })
+        });
     }
 }
