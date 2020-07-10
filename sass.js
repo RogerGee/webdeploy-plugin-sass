@@ -29,7 +29,7 @@ function resolveModulePath(path,currentPath) {
         }
 
         if (path[1] == '/') {
-            var newPath = pathModule.join(currentPath,path.substring(1))
+            var newPath = pathModule.join(currentPath,path.substring(1));
 
             return resolveModulePath(newPath,currentPath);
         }
@@ -143,7 +143,6 @@ module.exports = {
                         importer: importFunc
                     }, (err, result) => {
                         if (err) {
-                            console.log(target.getSourceTargetPath());
                             reject(err);
                         }
                         else {
