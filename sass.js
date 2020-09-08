@@ -25,6 +25,13 @@ function formatSettings(settings) {
     if (typeof settings.resolveRelativePaths !== 'boolean') {
         settings.resolveRelativePaths = true;
     }
+    settings.rename = settings.rename || null;
+    if (settings.rename === true) {
+        settings.rename = ".css";
+    }
+    if (settings.rename && typeof settings.rename !== "string") {
+        throw new Error("sass: invalid 'rename' setting");
+    }
 }
 
 function strip(string,match) {
@@ -147,7 +154,7 @@ function makeCustomImporter(targets,settings) {
             done({ file: path, contents: targetMap[path].content });
         }
         else {
-            done(new Error("Module '" + url + "' ('" + path + "') does not exist"));
+            done(new Error("sass: module '" + url + "' ('" + path + "') does not exist"));
         }
     };
 }
@@ -181,8 +188,7 @@ module.exports = {
             var promises = [];
             var importFunc = makeCustomImporter(scss,settings);
 
-            // Call node-sass on each target, saving the compilation into a new
-            // target with ".css" suffix.
+            // Call node-sass to compile each target.
             for (var i = 0;i < scss.length;++i) {
                 let target = scss[i];
 
@@ -193,21 +199,22 @@ module.exports = {
                 }
 
                 var renderPromise = new Promise((resolve,reject) => {
-                    let targetPath = target.getSourceTargetPath();
+                    const targetPath = target.getSourceTargetPath();
+                    const sourcePath = target.getSourcePath();
 
                     nodeSass.render({
                         // NOTE: We make all files relative to root directory to
                         // prevent resolution by libsass.
                         file: '/' + targetPath,
                         data: target.getContent(),
-                        includePaths: [target.getSourcePath()],
+                        includePaths: [sourcePath],
                         indentedSyntax: false,
                         importer: importFunc
 
                     }, (err, result) => {
                         if (err) {
                             if ("file" in err) {
-                                const msg = format("sass: error: %s in %s:%d",err.message,err.file,err.line);
+                                const msg = format("sass: %s in %s:%d",err.message,err.file,err.line);
                                 reject(new Error(msg));
                             }
                             else {
@@ -217,7 +224,13 @@ module.exports = {
                         else {
                             // Only include the build product if it resolved to actual content.
                             if (result.css.length > 0) {
-                                var newTarget = context.resolveTargets(targetPath,[target]);
+                                let newTargetPath = targetPath;
+                                if (settings.rename) {
+                                    newTargetPath = target.getTargetName().replace(/\.scss$/,settings.rename);
+                                    newTargetPath = pathModule.join(sourcePath,newTargetPath);
+                                }
+
+                                var newTarget = context.resolveTargets(newTargetPath,[target]);
                                 newTarget.stream.end(result.css.toString('utf8'));
                             }
                             else {
