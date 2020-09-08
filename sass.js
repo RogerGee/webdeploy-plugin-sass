@@ -32,6 +32,10 @@ function formatSettings(settings) {
     if (settings.rename && typeof settings.rename !== "string") {
         throw new Error("sass: invalid 'rename' setting");
     }
+    settings.targets = settings.targets || [];
+    if (!Array.isArray(settings.targets)) {
+        throw new Error("sass: invalid 'targets' setting");
+    }
 }
 
 function strip(string,match) {
@@ -46,7 +50,7 @@ function stripLeading(string,match) {
 }
 
 function stripTrailing(string,match) {
-    var n;
+    let n;
     while ((n = string.length - match.length) && string.substring(n) == match) {
         string = string.substring(0,n);
     }
@@ -54,7 +58,7 @@ function stripTrailing(string,match) {
 }
 
 function stripExtension(path) {
-    var match = path.match(/\.[^.\/]+$/);
+    const match = path.match(/\.[^.\/]+$/);
     if (match) {
         return path.substr(0,path.length - match[0].length);
     }
@@ -62,7 +66,7 @@ function stripExtension(path) {
 }
 
 function resolvePathPrefix(path,prefix,replacement) {
-    var match = path.match("^"+prefix+"(/.+)$");
+    const match = path.match("^"+prefix+"(/.+)$");
     if (match) {
         return replacement + match[1];
     }
@@ -82,7 +86,7 @@ function resolvePrefix(string,prefix,replacement) {
 }
 
 function resolveModulePath(path,settings) {
-    var newPath = path;
+    let newPath = path;
     newPath = stripLeading(newPath,pathModule.sep);
     if (settings.moduleBase) {
         newPath = resolvePathPrefix(newPath,settings.moduleBase,"");
@@ -100,15 +104,14 @@ function resolveImportPath(path,currentPath,settings) {
     // Resolve "." or ".." recursively.
     if (resolveRelativePaths && path[0] == '.') {
         if (path[1] == '.' && path[2] == '/') {
-            var newPath;
             currentPath = pathModule.parse(currentPath).dir;
-            newPath = pathModule.join(currentPath,path.substring(2));
+            const newPath = pathModule.join(currentPath,path.substring(2));
 
             return resolveImportPath(newPath,currentPath,settings);
         }
 
         if (path[1] == '/') {
-            var newPath = pathModule.join(currentPath,path.substring(1));
+            const newPath = pathModule.join(currentPath,path.substring(1));
 
             return resolveImportPath(newPath,currentPath,settings);
         }
@@ -133,10 +136,10 @@ function resolveImportPath(path,currentPath,settings) {
 }
 
 function makeCustomImporter(targets,settings) {
-    var targetMap = {};
+    const targetMap = {};
 
-    for (var i = 0;i < targets.length;++i) {
-        var modulePath = resolveModulePath(targets[i].getSourceTargetPath(),settings);
+    for (let i = 0;i < targets.length;++i) {
+        let modulePath = resolveModulePath(targets[i].getSourceTargetPath(),settings);
 
         // Strip the extension so that import paths don't have to specify the
         // extension.
@@ -147,8 +150,8 @@ function makeCustomImporter(targets,settings) {
 
     return (url,prev,done) => {
         // Determine current path context from previously resolved path.
-        var currentPath = resolveModulePath(pathModule.parse(prev).dir,settings);
-        var path = resolveImportPath(url,currentPath,settings);
+        const currentPath = resolveModulePath(pathModule.parse(prev).dir,settings);
+        const path = resolveImportPath(url,currentPath,settings);
 
         if (path in targetMap) {
             done({ file: path, contents: targetMap[path].content });
@@ -159,11 +162,20 @@ function makeCustomImporter(targets,settings) {
     };
 }
 
+function checkTargets(targets,targetPath) {
+    // If no targets are provided, then we just include everything.
+    if (targets.length == 0) {
+        return true;
+    }
+
+    return targets.some((regex) => targetPath.match(regex));
+}
+
 module.exports = {
     exec: (context,settings) => {
         formatSettings(settings);
 
-        var scss = [];
+        const scss = [];
 
         // Find all .scss targets.
         context.forEachTarget((target) => {
@@ -178,29 +190,32 @@ module.exports = {
 
         // Load all content into memory. The SASS compiler will need this for
         // module resolution anyway.
-        var promises = [];
+        const promises = [];
         for (var i = 0;i < scss.length;++i) {
             promises.push(scss[i].loadContent());
         }
 
         return Promise.all(promises).then(() => {
-            var rm = [];
-            var promises = [];
-            var importFunc = makeCustomImporter(scss,settings);
+            const rm = [];
+            const promises = [];
+            const importFunc = makeCustomImporter(scss,settings);
 
             // Call node-sass to compile each target.
             for (var i = 0;i < scss.length;++i) {
-                let target = scss[i];
+                const target = scss[i];
+                const targetPath = target.getSourceTargetPath();
+                const sourcePath = target.getSourcePath();
 
-                // Avoid rendering include-only targets.
-                if (target.options.isIncludeOnly) {
+                // Avoid rendering targets that are not included in the
+                // build. These targets are implicitly considered
+                // include-only. Note that the 'isIncludeOnly' option is still
+                // supported in the target options.
+                if (target.options.isIncludeOnly || !checkTargets(settings.targets,targetPath)) {
                     rm.push(target);
                     continue;
                 }
 
-                var renderPromise = new Promise((resolve,reject) => {
-                    const targetPath = target.getSourceTargetPath();
-                    const sourcePath = target.getSourcePath();
+                const renderPromise = new Promise((resolve,reject) => {
 
                     nodeSass.render({
                         // NOTE: We make all files relative to root directory to
@@ -226,11 +241,11 @@ module.exports = {
                             if (result.css.length > 0) {
                                 let newTargetPath = targetPath;
                                 if (settings.rename) {
-                                    newTargetPath = target.getTargetName().replace(/\.scss$/,settings.rename);
+                                    newTargetPath = target.getTargetName().replace(SCSS_REGEX,settings.rename);
                                     newTargetPath = pathModule.join(sourcePath,newTargetPath);
                                 }
 
-                                var newTarget = context.resolveTargets(newTargetPath,[target]);
+                                const newTarget = context.resolveTargets(newTargetPath,[target]);
                                 newTarget.stream.end(result.css.toString('utf8'));
                             }
                             else {
