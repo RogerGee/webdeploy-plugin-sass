@@ -2,6 +2,7 @@
 
 const pathModule = require('path').posix;
 const nodeSass = require('node-sass');
+const { format } = require("util");
 
 const SCSS_REGEX = /\.scss$/;
 
@@ -205,7 +206,13 @@ module.exports = {
 
                     }, (err, result) => {
                         if (err) {
-                            reject(err);
+                            if ("file" in err) {
+                                const msg = format("sass: error: %s in %s:%d",err.message,err.file,err.line);
+                                reject(new Error(msg));
+                            }
+                            else {
+                                reject(err);
+                            }
                         }
                         else {
                             // Only include the build product if it resolved to actual content.
