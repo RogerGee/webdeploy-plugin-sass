@@ -135,7 +135,7 @@ function resolveImportPath(path,currentPath,settings) {
     return stripLeading(path,pathModule.sep);
 }
 
-function makeCustomImporter(targets,settings) {
+function makeImporterFactory(graph,targets,imported,settings) {
     const targetMap = {};
 
     for (let i = 0;i < targets.length;++i) {
@@ -148,17 +148,25 @@ function makeCustomImporter(targets,settings) {
         targetMap[modulePath] = targets[i];
     }
 
-    return (url,prev,done) => {
-        // Determine current path context from previously resolved path.
-        const currentPath = resolveModulePath(pathModule.parse(prev).dir,settings);
-        const path = resolveImportPath(url,currentPath,settings);
+    return function makeCustomImporter(parentTarget) {
+        return (url,prev,done) => {
+            // Determine current path context from previously resolved path.
+            const currentPath = resolveModulePath(pathModule.parse(prev).dir,settings);
+            const path = resolveImportPath(url,currentPath,settings);
 
-        if (path in targetMap) {
-            done({ file: path, contents: targetMap[path].content });
-        }
-        else {
-            done(new Error("sass: module '" + url + "' ('" + path + "') does not exist"));
-        }
+            if (path in targetMap) {
+                const target = targetMap[path];
+
+                graph.addLink(parentTarget.getSourceTargetPath(),target.getSourceTargetPath());
+                imported.add(target.getSourceTargetPath());
+
+                done({ file: path, contents: target.content });
+            }
+            else {
+                done(new Error("sass: module '" + url + "' ('" + path + "') does not exist"));
+            }
+        };
+
     };
 }
 
@@ -169,6 +177,25 @@ function checkTargets(targets,targetPath) {
     }
 
     return targets.some((regex) => targetPath.match(regex));
+}
+
+function removeImportTargets(context,targets,utilized) {
+    // Remove the targets marked for removal. Targets that were not utilized get
+    // removed from the dependency graph.
+    const used = [];
+    const notused = [];
+    for (let i = 0;i < targets.length;++i) {
+        const target = targets[i];
+        if (utilized.has(target.getSourceTargetPath())) {
+            used.push(target);
+        }
+        else {
+            notused.push(target);
+        }
+    }
+
+    context.removeTargets(used,false);
+    context.removeTargets(notused,true);
 }
 
 module.exports = {
@@ -198,7 +225,8 @@ module.exports = {
         return Promise.all(promises).then(() => {
             const rm = [];
             const promises = [];
-            const importFunc = makeCustomImporter(scss,settings);
+            const utilized = new Set();
+            const importFactory = makeImporterFactory(context.graph,scss,utilized,settings);
 
             // Call node-sass to compile each target.
             for (var i = 0;i < scss.length;++i) {
@@ -216,7 +244,6 @@ module.exports = {
                 }
 
                 const renderPromise = new Promise((resolve,reject) => {
-
                     nodeSass.render({
                         // NOTE: We make all files relative to root directory to
                         // prevent resolution by libsass.
@@ -224,7 +251,7 @@ module.exports = {
                         data: target.getContent(),
                         includePaths: [sourcePath],
                         indentedSyntax: false,
-                        importer: importFunc
+                        importer: importFactory(target)
 
                     }, (err, result) => {
                         if (err) {
@@ -261,10 +288,9 @@ module.exports = {
                 promises.push(renderPromise);
             }
 
-            // Remove any removed targets.
-            context.resolveTargets(null,rm);
-
-            return Promise.all(promises);
+            return Promise.all(promises).then(() => {
+                removeImportTargets(context,rm,utilized);
+            });
         });
     }
 }
