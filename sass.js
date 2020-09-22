@@ -12,7 +12,7 @@ function formatSettings(settings) {
     settings.moduleBase = strip(settings.moduleBase || "",sep);
     settings.alias = settings.alias || null;
     if (typeof settings.alias === "object" && settings.alias) {
-        var alias = {};
+        const alias = {};
         Object.keys(settings.alias).forEach((key) => {
             alias[strip(key,sep)] = strip(settings.alias[key],sep);
         });
@@ -25,7 +25,7 @@ function formatSettings(settings) {
     if (typeof settings.resolveRelativePaths !== 'boolean') {
         settings.resolveRelativePaths = true;
     }
-    settings.rename = settings.rename || null;
+    settings.rename = settings.rename || false;
     if (settings.rename === true) {
         settings.rename = ".css";
     }
@@ -198,8 +198,21 @@ function removeImportTargets(context,targets,utilized) {
     context.removeTargets(notused,true);
 }
 
+function render(options) {
+    return new Promise((resolve,reject) => {
+        nodeSass.render(options,(err, result) => {
+            if (err) {
+                reject(err);
+            }
+            else {
+                resolve(result);
+            }
+        });
+    });
+}
+
 module.exports = {
-    exec: (context,settings) => {
+    async exec(context,settings) {
         formatSettings(settings);
 
         const scss = [];
@@ -212,85 +225,73 @@ module.exports = {
         });
 
         if (scss.length == 0) {
-            return Promise.resolve();
+            return;
         }
 
-        // Load all content into memory. The SASS compiler will need this for
-        // module resolution anyway.
+        // Ensure all target content loaded into memory. The SASS compiler will
+        // need this for module resolution anyway.
+        for (let i = 0;i < scss.length;++i) {
+            await scss[i].loadContent();
+        }
+
+        const rm = [];
         const promises = [];
-        for (var i = 0;i < scss.length;++i) {
-            promises.push(scss[i].loadContent());
-        }
+        const utilized = new Set();
+        const importerFactory = makeImporterFactory(context.graph,scss,utilized,settings);
 
-        return Promise.all(promises).then(() => {
-            const rm = [];
-            const promises = [];
-            const utilized = new Set();
-            const importFactory = makeImporterFactory(context.graph,scss,utilized,settings);
+        // Invoke node-sass to compile each target.
+        for (let i = 0;i < scss.length;++i) {
+            const target = scss[i];
+            const targetPath = target.getSourceTargetPath();
+            const sourcePath = target.getSourcePath();
 
-            // Call node-sass to compile each target.
-            for (var i = 0;i < scss.length;++i) {
-                const target = scss[i];
-                const targetPath = target.getSourceTargetPath();
-                const sourcePath = target.getSourcePath();
-
-                // Avoid rendering targets that are not included in the
-                // build. These targets are implicitly considered
-                // include-only. Note that the 'isIncludeOnly' option is still
-                // supported in the target options.
-                if (target.options.isIncludeOnly || !checkTargets(settings.targets,targetPath)) {
-                    rm.push(target);
-                    continue;
-                }
-
-                const renderPromise = new Promise((resolve,reject) => {
-                    nodeSass.render({
-                        // NOTE: We make all files relative to root directory to
-                        // prevent resolution by libsass.
-                        file: '/' + targetPath,
-                        data: target.getContent(),
-                        includePaths: [sourcePath],
-                        indentedSyntax: false,
-                        importer: importFactory(target)
-
-                    }, (err, result) => {
-                        if (err) {
-                            if ("file" in err) {
-                                const msg = format("sass: %s in %s:%d",err.message,err.file,err.line);
-                                reject(new Error(msg));
-                            }
-                            else {
-                                reject(err);
-                            }
-                        }
-                        else {
-                            // Only include the build product if it resolved to actual content.
-                            if (result.css.length > 0) {
-                                let newTargetPath = targetPath;
-                                if (settings.rename) {
-                                    newTargetPath = target.getTargetName().replace(SCSS_REGEX,settings.rename);
-                                    newTargetPath = pathModule.join(sourcePath,newTargetPath);
-                                }
-
-                                const newTarget = context.resolveTargets(newTargetPath,[target]);
-                                newTarget.stream.end(result.css.toString('utf8'));
-                            }
-                            else {
-                                // Otherwise remove the target if it evaluated to empty.
-                                context.resolveTargets(null,[target]);
-                            }
-
-                            resolve();
-                        }
-                    });
-                });
-
-                promises.push(renderPromise);
+            // Avoid rendering targets that are not included in the build. These
+            // targets are implicitly considered include-only. Note that the
+            // 'isIncludeOnly' option is still supported in the target options.
+            if (target.options.isIncludeOnly || !checkTargets(settings.targets,targetPath)) {
+                rm.push(target);
+                continue;
             }
 
-            return Promise.all(promises).then(() => {
-                removeImportTargets(context,rm,utilized);
-            });
-        });
+            let result;
+            try {
+                const options = {
+                    // NOTE: We make all files relative to root directory to
+                    // prevent resolution to the CWD by libsass.
+                    file: '/' + targetPath,
+                    data: target.getContent(),
+                    includePaths: [sourcePath],
+                    indentedSyntax: false,
+                    importer: importerFactory(target)
+                };
+
+                result = await render(options);
+
+            } catch (err) {
+                if ("file" in err) {
+                    throw new Error(format("sass: %s in %s:%d",err.message,err.file,err.line));
+                }
+
+                throw err;
+            }
+
+            // Only include the build product if it resolved to actual content.
+            if (result.css.length > 0) {
+                let newTargetPath = targetPath;
+                if (settings.rename) {
+                    newTargetPath = target.getTargetName().replace(SCSS_REGEX,settings.rename);
+                    newTargetPath = pathModule.join(sourcePath,newTargetPath);
+                }
+
+                const newTarget = context.resolveTargets(newTargetPath,[target]);
+                newTarget.stream.end(result.css.toString('utf8'));
+            }
+            else {
+                // Otherwise remove the target if it evaluated to empty.
+                context.resolveTargets(null,[target]);
+            }
+        }
+
+        removeImportTargets(context,rm,utilized);
     }
-}
+};
