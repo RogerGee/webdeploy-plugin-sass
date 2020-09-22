@@ -1,6 +1,6 @@
 {
   "name": "@webdeploy/plugin-sass",
-  "version": "1.0.0-dev",
+  "version": "1.0.0",
   "description": "Webdeploy deploy plugin for Sass compilation",
   "main": "sass.js",
   "repository": {
