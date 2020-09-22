@@ -1,15 +1,15 @@
 {
-  "name": "@tccl/sass",
-  "version": "1.0.0",
-  "description": "Webdeploy sass deploy plugin",
+  "name": "@webdeploy/plugin-sass",
+  "version": "1.0.0-dev",
+  "description": "Webdeploy deploy plugin for Sass compilation",
   "main": "sass.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
   "repository": {
     "type": "git",
-    "url": "https://tccl-apps/git/webdeploy/sass.git"
+    "url": "https://github.com/RogerGee/webdeploy-plugin-sass.git"
   },
   "author": "Roger Gee",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "node-sass": "^4.14.1"
+  }
 }
